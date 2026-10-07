@@ -7,6 +7,7 @@ import hashlib
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 DEFAULT_UA = (
@@ -24,17 +25,26 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
 
-def http_get(url, headers=None):
+def http_get(url, headers=None, follow=True, max_hops=6):
     h = {"User-Agent": DEFAULT_UA}
     if headers:
         h.update(headers)
-    req = urllib.request.Request(url, headers=h, method="GET")
     opener = urllib.request.build_opener(NoRedirect)
-    try:
-        with opener.open(req) as r:
-            return r.status, dict(r.headers), r.read()
-    except urllib.error.HTTPError as e:
-        return e.code, dict(e.headers), e.read()
+    for _ in range(max_hops):
+        req = urllib.request.Request(url, headers=h, method="GET")
+        try:
+            with opener.open(req) as r:
+                status, rhdr, body = r.status, dict(r.headers), r.read()
+        except urllib.error.HTTPError as e:
+            status, rhdr, body = e.code, dict(e.headers), e.read()
+        if not follow or status not in (301, 302, 303, 307, 308):
+            return status, rhdr, body
+        loc = get_header(rhdr, "Location")
+        if not loc:
+            return status, rhdr, body
+        url = urllib.parse.urljoin(url, loc)
+        print(f"[*] redirect -> {url}")
+    return status, rhdr, body
 
 def http_post(url, body, headers=None):
     h = {"User-Agent": DEFAULT_UA}
